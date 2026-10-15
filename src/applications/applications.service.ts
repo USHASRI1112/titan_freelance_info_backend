@@ -28,7 +28,6 @@ import {
 import { SelectApplicationDto } from './dto/select-application.dto.js';
 import {
   applicationReceived,
-  applicationSelected,
   applicationStatusChanged,
   applicationSubmitted,
   applicationWithdrawn,
@@ -36,7 +35,10 @@ import {
 } from '../notifications/notification-messages.js';
 import { NotificationsService } from '../notifications/notifications.service.js';
 import { checkEligibility } from './eligibility.js';
-import { selectionEmail } from './selection-email.js';
+import {
+  selectionConfirmationEmail,
+  selectionEmail,
+} from './selection-email.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateApplicationDto } from './dto/create-application.dto.js';
 import { CreateDocumentTypeDto } from './dto/create-document-type.dto.js';
@@ -1371,12 +1373,13 @@ export class ApplicationsService {
   }
 
   /**
-   * Selects a candidate: emails the congratulations message with the work
-   * account and instructions, then marks the application HIRED. The email is
+   * Offers a candidate: emails the onboarding message with the work
+   * account and instructions, then marks the application OFFERED. The email is
    * sent first, so a failed email leaves the status unchanged. The password is
-   * never stored. Calling it again on a selected candidate resends the email.
+   * stored encrypted for the candidate's project access. Calling it again on
+   * an offered candidate resends the email.
    */
-  async selectCandidate(
+  async offerCandidate(
     applicationId: string,
     staffUserId: string,
     dto: SelectApplicationDto,
@@ -1384,7 +1387,7 @@ export class ApplicationsService {
     this.assertValidUuid(applicationId, 'application');
     if (!(await this.hasStaffAccess(staffUserId))) {
       throw new ForbiddenException(
-        'Only an administrator or recruiter can select candidates.',
+        'Only an administrator or recruiter can offer candidates.',
       );
     }
     const application = await this.prisma.candidateApplication.findFirst({
@@ -1420,11 +1423,11 @@ export class ApplicationsService {
       }),
     );
 
-    const alreadySelected = application.status === ApplicationStatus.HIRED;
+    const alreadyOffered = application.status === ApplicationStatus.OFFERED;
     const note = [
-      alreadySelected
-        ? `Selection email resent (work account ${dto.workEmail}).`
-        : `Selected. Work account ${dto.workEmail}${dto.workInstructions ? ' and instructions' : ''} emailed to the candidate.`,
+      alreadyOffered
+        ? `Onboarding email resent (work account ${dto.workEmail}).`
+        : `Offered. Work account ${dto.workEmail}${dto.workInstructions ? ' and instructions' : ''} emailed to the candidate.`,
       dto.comment,
     ]
       .filter(Boolean)
@@ -1444,11 +1447,11 @@ export class ApplicationsService {
         create: { applicationId, ...workAccount },
         update: workAccount,
       });
-      if (!alreadySelected) {
+      if (!alreadyOffered) {
         await tx.candidateApplication.update({
           where: { id: applicationId },
           data: {
-            status: ApplicationStatus.HIRED,
+            status: ApplicationStatus.OFFERED,
             statusChangedAt: new Date(),
           },
         });
@@ -1457,17 +1460,18 @@ export class ApplicationsService {
         data: {
           applicationId,
           fromStatus: application.status,
-          toStatus: ApplicationStatus.HIRED,
+          toStatus: ApplicationStatus.OFFERED,
           changedById: staffUserId,
           comment: note,
         },
       });
     });
 
-    await this.notifications.notifyUser(
-      application.userId,
-      applicationSelected(application.job.title, alreadySelected),
+    const notice = applicationStatusChanged(
+      ApplicationStatus.OFFERED,
+      application.job.title,
     );
+    if (notice) await this.notifications.notifyUser(application.userId, notice);
     return this.assertCanAccess(applicationId, staffUserId);
   }
 
@@ -1508,6 +1512,29 @@ export class ApplicationsService {
 
     if (application.status === dto.status) {
       return this.assertCanAccess(applicationId, userId);
+    }
+
+    if (dto.status === ApplicationStatus.HIRED) {
+      const candidate = await this.prisma.candidateApplication.findFirst({
+        where: { id: applicationId, deletedAt: null },
+        include: {
+          candidate: { select: { email: true, firstName: true } },
+          job: { select: { title: true } },
+        },
+      });
+      if (!candidate) throw new NotFoundException('Application not found.');
+      const frontendUrl = this.configService.get<string>('FRONTEND_URL');
+      await this.mailService.send(
+        candidate.candidate.email,
+        selectionConfirmationEmail({
+          name: candidate.candidate.firstName,
+          projectTitle: candidate.job.title,
+          applicationNo: application.applicationNo,
+          projectsUrl: frontendUrl
+            ? `${frontendUrl.replace(/\/$/, '')}/projects/current`
+            : null,
+        }),
+      );
     }
 
     await this.prisma.$transaction(async (tx) => {

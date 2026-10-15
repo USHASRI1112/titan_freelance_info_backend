@@ -345,26 +345,26 @@ export class ApplicationsController {
     return { success: true, data };
   }
 
-  @Post(':id/select')
+  @Post(':id/offer')
   @Roles(UserRole.ADMIN, UserRole.RECRUITER)
   @ApiBearerAuth()
   @ApiOperation({
     summary:
-      'Select a candidate: email the congratulations + work credentials and mark HIRED',
+      'Offer a candidate: email the onboarding credentials and mark OFFERED',
   })
   async select(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: SelectApplicationDto,
   ) {
-    const data = await this.applicationsService.selectCandidate(
+    const data = await this.applicationsService.offerCandidate(
       id,
       user.id,
       dto,
     );
     return {
       success: true,
-      message: 'Candidate selected and confirmation email sent.',
+      message: 'Candidate offered and onboarding email sent.',
       data,
     };
   }

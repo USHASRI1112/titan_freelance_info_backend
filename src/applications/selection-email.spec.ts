@@ -12,7 +12,7 @@ import { selectionEmail } from './selection-email.js';
 const applicationId = '44444444-4444-4444-8444-444444444444';
 
 describe('selectionEmail', () => {
-  it('includes credentials and numbered instructions, escaped', () => {
+  it('includes credentials and preserves instruction formatting, escaped', () => {
     const email = selectionEmail({
       name: 'Usha Sri',
       projectTitle: 'AI <Evaluator>',
@@ -25,16 +25,17 @@ describe('selectionEmail', () => {
     expect(email.subject).toContain('AI <Evaluator>');
     expect(email.html).toContain('AI &lt;Evaluator&gt;');
     expect(email.html).toContain('p@ss&lt;1&gt;');
-    expect(email.html).toContain(
-      '<li style="margin:0 0 6px;">Log in daily</li>',
-    );
+    expect(email.html).toContain('white-space:pre-wrap;');
+    expect(email.html).toContain('- Log in daily\n2. Track hours');
+    expect(email.html).not.toContain('<ol');
+    expect(email.html).not.toContain('<li');
     expect(email.html).toContain('Open My Projects');
     expect(email.text).toContain('Password: p@ss<1>');
     expect(email.text).toContain('Hi Usha,');
   });
 });
 
-describe('ApplicationsService.selectCandidate', () => {
+describe('ApplicationsService.offerCandidate', () => {
   function createService(sendFails = false) {
     const update = vi.fn();
     const historyCreate = vi.fn();
@@ -88,7 +89,7 @@ describe('ApplicationsService.selectCandidate', () => {
   it('leaves the status unchanged when the email fails', async () => {
     const { service, update } = createService(true);
     await expect(
-      service.selectCandidate(applicationId, 'admin-1', {
+      service.offerCandidate(applicationId, 'admin-1', {
         workEmail: 'w@client.com',
         workPassword: 'secret',
       }),
@@ -96,7 +97,7 @@ describe('ApplicationsService.selectCandidate', () => {
     expect(update).not.toHaveBeenCalled();
   });
 
-  it('emails first, then marks HIRED without storing the password', async () => {
+  it('emails first, then marks OFFERED without storing the password', async () => {
     const {
       service,
       send,
@@ -111,7 +112,7 @@ describe('ApplicationsService.selectCandidate', () => {
       'assertCanAccess',
     ).mockResolvedValue({ id: applicationId });
 
-    await service.selectCandidate(applicationId, 'admin-1', {
+    await service.offerCandidate(applicationId, 'admin-1', {
       workEmail: 'w@client.com',
       workPassword: 'secret',
       workInstructions: 'Log in daily',
@@ -125,7 +126,7 @@ describe('ApplicationsService.selectCandidate', () => {
     );
     expect(update).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ status: 'HIRED' }),
+        data: expect.objectContaining({ status: 'OFFERED' }),
       }),
     );
     const note = historyCreate.mock.calls[0][0].data.comment as string;
@@ -133,7 +134,7 @@ describe('ApplicationsService.selectCandidate', () => {
     expect(note).not.toContain('secret');
     expect(notifications.notifyUser).toHaveBeenCalledWith(
       'candidate-1',
-      expect.objectContaining({ type: 'APPLICATION_SELECTED' }),
+      expect.objectContaining({ type: 'APPLICATION_STATUS' }),
     );
     // Stored for later viewing, but only encrypted.
     expect(workAccountUpsert).toHaveBeenCalledWith(

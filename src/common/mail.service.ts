@@ -25,6 +25,9 @@ export class MailService {
 
     const nodemailer = await import('nodemailer');
     const port = Number(this.configService.get<number>('SMTP_PORT') ?? 587);
+    this.logger.log(
+      `SMTP ${host}:${port} user=${this.configService.get<string>('SMTP_USER')}`,
+    );
     const transporter = nodemailer.createTransport({
       host,
       port,

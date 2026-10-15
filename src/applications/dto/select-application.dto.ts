@@ -29,10 +29,9 @@ export class SelectApplicationDto {
   workPassword: string;
 
   @ApiPropertyOptional({
-    description: 'One instruction per line; shown as a numbered list.',
+    description: 'Instruction text emailed with its original line breaks.',
   })
   @IsOptional()
-  @Transform(trim)
   @IsString()
   @MaxLength(5000)
   workInstructions?: string;
